@@ -1,7 +1,7 @@
 package siface
 
 /*
-	定义一个服务器接口
+	定义一个服务器模块的接口
 */
 type IServer interface {
 	//启动服务器
