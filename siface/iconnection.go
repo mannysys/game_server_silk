@@ -24,6 +24,3 @@ type IConnection interface {
 	//发送数据，将数据发送给远程的客户端
 	Send(data []byte) error
 }
-
-//定义一个处理连接业务的方法（声明一个 HandleFunc函数，函数类型的）
-type HandleFunc func(*net.TCPConn, []byte, int) error

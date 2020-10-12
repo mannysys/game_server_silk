@@ -3,7 +3,6 @@ package snet
 import (
 	"fmt"
 	"game_server_silk/siface"
-	"github.com/pkg/errors"
 	"net"
 )
 
@@ -19,17 +18,11 @@ type Server struct {
 	IP string
 	//服务器监听的端口
 	Port int
+
+	//当前的server添加一个router属性，server注册的链接对应的处理业务
+	Router siface.IRouter
 }
 
-//定义当前客户端连接所绑定的handle api（目前这个handle是写死的，以后优化应该由用户自定义的handle方法）
-func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
-	fmt.Println("处理连接读取的数据写回给客户端")
-	if _, err := conn.Write(data[:cnt]); err != nil {
-		fmt.Println("write back buf err ", err)
-		return errors.New("CallBackToClient error")
-	}
-	return nil
-}
 
 //启动服务器
 func (s *Server) Start() {
@@ -66,7 +59,7 @@ func (s *Server) Start() {
 			}
 
 			//将原生连接对象conn和自定义方法，交给我们封装的新连接模块去处理
-			dealConn := NewConnection(conn, cid, CallBackToClient)
+			dealConn := NewConnection(conn, cid, s.Router)
 			cid ++
 
 			//启动当前连接业务处理
@@ -93,6 +86,13 @@ func (s *Server) Serve() {
 	select {}
 }
 
+
+//路由功能：给当前的服务注册一个路由方法，供客户端的链接处理使用
+func (s *Server) AddRouter(router siface.IRouter) {
+	s.Router = router
+	fmt.Println("路由注册添加成功！！")
+}
+
 /*
 	初始化Server模块的方法
 */
@@ -102,6 +102,7 @@ func NewServer(name string) siface.IServer {
 		IPVersion: "tcp4",
 		IP:        "0.0.0.0",
 		Port:      8999,
+		Router:    nil,
 	}
 	return s
 }

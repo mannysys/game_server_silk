@@ -19,19 +19,19 @@ type Connection struct {
 	//当前的连接状态
 	isClosed bool
 
-	//当前连接所绑定的处理业务方法API
-	handleAPI siface.HandleFunc
-
 	//定义一个告知当前连接已经退出或停止 channel
 	ExitChan chan bool
+
+	//该链接处理的方法Router
+	Router siface.IRouter
 }
 
 //初始化连接模块的方法
-func NewConnection(conn *net.TCPConn, connID uint32, callback_api siface.HandleFunc) *Connection {
+func NewConnection(conn *net.TCPConn, connID uint32, router siface.IRouter) *Connection {
 	c := &Connection{
 		Conn:      conn,
 		ConnID:    connID,
-		handleAPI: callback_api,
+		Router:    router,
 		isClosed:  false, //表示当前连接是否处于关闭状态，false表示连接是开启的状态
 		ExitChan:  make(chan bool, 1),
 	}
@@ -47,17 +47,23 @@ func (c *Connection) StartReader() {
 	for {
 		//读取客户端连接的数据到buf中，最大512字节
 		buf := make([]byte, 512)
-		cnt, err := c.Conn.Read(buf)
+		_, err := c.Conn.Read(buf)
 		if err != nil {
 			fmt.Println("[读取客户端连接中的数据<失败>]", err)
 			continue
 		}
 
-		//调用当前连接所绑定的HandleAPI（调用c.handleAPI属性，就是调用了赋值给handleAPI属性的方法）
-		if err := c.handleAPI(c.Conn, buf, cnt); err != nil {
-			fmt.Println("[当前连接ID]", c.ConnID, "[当前连接绑定方法执行失败]", err)
-			break
+		//将链接模块和消息数据，封装在Request模块中，变成一个request请求交给路由模块进行处理
+		req := Request{
+			conn: c,
+			data:buf,
 		}
+		//执行注册的路由方法
+		go func(request siface.IRequest) {
+			c.Router.PreHandle(request)
+			c.Router.Handle(request)
+			c.Router.PostHandle(request)
+		}(&req)
 
 	}
 
