@@ -3,6 +3,7 @@ package snet
 import (
 	"fmt"
 	"game_server_silk/siface"
+	"game_server_silk/utils"
 	"net"
 )
 
@@ -26,7 +27,10 @@ type Server struct {
 
 //启动服务器
 func (s *Server) Start() {
-	fmt.Printf("[Start] Server Listenner at IP: %s, Port: %d, is starting\n", s.IP, s.Port)
+	fmt.Printf("[Silk] Server Name:%s, listenner at IP:%s, Port:%d is starting\n",
+		utils.GlobalObject.Name,utils.GlobalObject.Host,utils.GlobalObject.TcpPort)
+	fmt.Printf("[Silk] Version %s, MaxConn:%d, MaxPackageSize:%d\n",
+		utils.GlobalObject.Version,utils.GlobalObject.MaxConn,utils.GlobalObject.MaxPackageSize)
 
 	//开启一个协程去处理阻塞等待客户端连接业务（异步形式去处理客户端连接）
 	go func() {
@@ -98,10 +102,10 @@ func (s *Server) AddRouter(router siface.IRouter) {
 */
 func NewServer(name string) siface.IServer {
 	s := &Server{
-		Name:      name,
+		Name:      utils.GlobalObject.Name,
 		IPVersion: "tcp4",
-		IP:        "0.0.0.0",
-		Port:      8999,
+		IP:        utils.GlobalObject.Host,
+		Port:      utils.GlobalObject.TcpPort,
 		Router:    nil,
 	}
 	return s

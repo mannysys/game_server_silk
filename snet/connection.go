@@ -3,6 +3,7 @@ package snet
 import (
 	"fmt"
 	"game_server_silk/siface"
+	"game_server_silk/utils"
 	"net"
 )
 
@@ -45,8 +46,8 @@ func (c *Connection) StartReader() {
 	defer c.Stop()
 
 	for {
-		//读取客户端连接的数据到buf中，最大512字节
-		buf := make([]byte, 512)
+		//读取客户端连接的数据到buf中
+		buf := make([]byte, utils.GlobalObject.MaxPackageSize)
 		_, err := c.Conn.Read(buf)
 		if err != nil {
 			fmt.Println("[读取客户端连接中的数据<失败>]", err)
