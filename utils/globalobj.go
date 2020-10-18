@@ -53,7 +53,7 @@ func init() {
 	//如果没有加载json配置文件，就是要以下初始化默认值
 	GlobalObject = &GlobalObj{
 		Name:           "SilkServerApp",
-		Version:        "V0.4",
+		Version:        "V0.5",
 		TcpPort:		8999,
 		Host:			"0.0.0.0",
 		MaxConn:		1000,
