@@ -20,8 +20,8 @@ type Server struct {
 	//服务器监听的端口
 	Port int
 
-	//当前的server添加一个router属性，server注册的链接对应的处理业务
-	Router siface.IRouter
+	//当前server消息管理多路由模块（用来绑定MsgID和对应的处理业务API关系）
+	MsgHandler siface.IMsgHandler
 }
 
 
@@ -63,7 +63,7 @@ func (s *Server) Start() {
 			}
 
 			//将原生连接对象conn和自定义方法，交给我们封装的新连接模块去处理
-			dealConn := NewConnection(conn, cid, s.Router)
+			dealConn := NewConnection(conn, cid, s.MsgHandler)
 			cid ++
 
 			//启动当前连接业务处理
@@ -92,8 +92,8 @@ func (s *Server) Serve() {
 
 
 //路由功能：给当前的服务注册一个路由方法，供客户端的链接处理使用
-func (s *Server) AddRouter(router siface.IRouter) {
-	s.Router = router
+func (s *Server) AddRouter(msgID uint32, router siface.IRouter) {
+	s.MsgHandler.AddRouter(msgID, router)
 	fmt.Println("路由注册添加成功！！")
 }
 
@@ -106,7 +106,7 @@ func NewServer(name string) siface.IServer {
 		IPVersion: "tcp4",
 		IP:        utils.GlobalObject.Host,
 		Port:      utils.GlobalObject.TcpPort,
-		Router:    nil,
+		MsgHandler:NewMsgHandler(),
 	}
 	return s
 }

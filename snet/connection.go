@@ -24,16 +24,16 @@ type Connection struct {
 	//定义一个告知当前连接已经退出或停止 channel
 	ExitChan chan bool
 
-	//该链接处理的方法Router
-	Router siface.IRouter
+	//消息管理多路由模块（用来绑定MsgID和对应的处理业务API关系）
+	MsgHandler siface.IMsgHandler
 }
 
 //初始化连接模块的方法
-func NewConnection(conn *net.TCPConn, connID uint32, router siface.IRouter) *Connection {
+func NewConnection(conn *net.TCPConn, connID uint32, msgHandler siface.IMsgHandler) *Connection {
 	c := &Connection{
 		Conn:      conn,
 		ConnID:    connID,
-		Router:    router,
+		MsgHandler:msgHandler,
 		isClosed:  false, //表示当前连接是否处于关闭状态，false表示连接是开启的状态
 		ExitChan:  make(chan bool, 1),
 	}
@@ -90,12 +90,9 @@ func (c *Connection) StartReader() {
 			conn: c,
 			msg: msg,
 		}
-		//执行注册的路由方法
-		go func(request siface.IRequest) {
-			c.Router.PreHandle(request)
-			c.Router.Handle(request)
-			c.Router.PostHandle(request)
-		}(&req)
+
+		//根据绑定好的MsgID 找到对应处理的api 业务执行
+		go c.MsgHandler.DoMsgHandler(&req)
 
 	}
 
