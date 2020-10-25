@@ -3,6 +3,7 @@ package snet
 import (
 	"fmt"
 	"game_server_silk/siface"
+	"game_server_silk/utils"
 	"github.com/pkg/errors"
 	"io"
 	"net"
@@ -10,8 +11,11 @@ import (
 
 /*
 	封装一个自定义的连接模块
- */
+*/
 type Connection struct {
+	//当前Conn连接模块 隶属于哪个Server
+	TcpServer siface.IServer
+
 	//当前连接的socket TCP套接字（存储当前原生的连接对象）
 	Conn *net.TCPConn
 
@@ -21,29 +25,38 @@ type Connection struct {
 	//当前的连接状态
 	isClosed bool
 
-	//定义一个告知当前连接已经退出或停止 channel
+	//定义一个告知当前连接已经退出或停止 channel（由Reader告知Writer退出消息）
 	ExitChan chan bool
+
+	//无缓冲的管道，用于读、写Goroutine之间的消息通信
+	msgChan chan []byte
 
 	//消息管理多路由模块（用来绑定MsgID和对应的处理业务API关系）
 	MsgHandler siface.IMsgHandler
 }
 
 //初始化连接模块的方法
-func NewConnection(conn *net.TCPConn, connID uint32, msgHandler siface.IMsgHandler) *Connection {
+func NewConnection(server siface.IServer, conn *net.TCPConn, connID uint32, msgHandler siface.IMsgHandler) *Connection {
 	c := &Connection{
-		Conn:      conn,
-		ConnID:    connID,
-		MsgHandler:msgHandler,
-		isClosed:  false, //表示当前连接是否处于关闭状态，false表示连接是开启的状态
-		ExitChan:  make(chan bool, 1),
+		TcpServer: server,
+		Conn:       conn,
+		ConnID:     connID,
+		MsgHandler: msgHandler,
+		isClosed:   false, //表示当前连接是否处于关闭状态，false表示连接是开启的状态
+		msgChan:    make(chan []byte),
+		ExitChan:   make(chan bool, 1),
 	}
+
+	//将conn连接模块实例，加入到 ConnManager连接管理器集合中
+	c.TcpServer.GetConnMgr().Add(c)
+
 	return c
 }
 
 //连接模块中的读数据的业务方法
 func (c *Connection) StartReader() {
-	fmt.Println("[读取当前协程中客户端连接中发送的数据]")
-	defer fmt.Println("[客户端建立的连接ID]",c.ConnID ,"[链接读取协程退出,远程客户端的地址]", c.RemoteAddr().String())
+	fmt.Println("[启动读消息的协程]Reader Gortine is running")
+	defer fmt.Println("[读消息的协程退出]conn Reader exit!", c.ConnID, c.RemoteAddr().String())
 	defer c.Stop()
 
 	for {
@@ -61,7 +74,7 @@ func (c *Connection) StartReader() {
 		headData := make([]byte, dp.GetHeadLen())
 		//从连接流中读取数据，将数据读到 headData切片中（切片空间8个字节，把空间读满为止）
 		if _, err := io.ReadFull(c.GetTCPConnection(), headData); err != nil {
-			fmt.Println("读取连接流中消息包头部数据失败：", err)
+			fmt.Println("读取客户端连接中消息头部数据失败：", err)
 			break
 		}
 
@@ -88,25 +101,57 @@ func (c *Connection) StartReader() {
 		//将链接模块和消息模块，封装在Request模块中，变成一个request请求交给路由模块进行处理
 		req := Request{
 			conn: c,
-			msg: msg,
+			msg:  msg,
 		}
 
-		//根据绑定好的MsgID 找到对应处理的api 业务执行
-		go c.MsgHandler.DoMsgHandler(&req)
+		//检查工作池是否启动
+		if utils.GlobalObject.WorkerPoolSize > 0 {
+			//已经开启了工作池机制，将得到客户端消息发送给worker工作池处理即可
+			c.MsgHandler.SendMsgToTaskQueue(&req)
+		}else {
+			//根据绑定好的MsgID 找到对应处理的api 业务执行
+			go c.MsgHandler.DoMsgHandler(&req)
+		}
 
 	}
 
 }
 
+/*
+	写消息Goroutine，负责发送给客户端消息的方法
+ */
+func (c *Connection) StartWriter() {
+	fmt.Println("[启动写消息的协程]Writer Gortine is running")
+	defer fmt.Println("[写消息的协程退出]conn Writer exit!", c.ConnID, c.RemoteAddr().String())
+
+	//不断的阻塞的等待channel的消息，进行写给客户端
+	for {
+		select {
+		case data := <-c.msgChan:
+			//接收chan管道传过来的数据，写给客户端
+			if _, err := c.Conn.Write(data); err != nil {
+				fmt.Println("[写数据失败]Send data error, ", err)
+				return
+			}
+		case <-c.ExitChan:
+			//表示Reader已经退出，此时Writer也要退出
+			return
+		}
+	}
+}
+
 //启动连接 让当前的连接准备开始工作
 func (c *Connection) Start() {
-	fmt.Println("[启动一个连接模块 ID]", c.ConnID)
+	fmt.Println("[启动一个与客户端建立连接模块] ConnID=", c.ConnID)
 
 	//开启一个协程，去处理从当前连接中读数据的业务
 	go c.StartReader()
 
-	//TODO 启动从当前连接写数据的业务
+	//启动从当前连接写数据的业务
+	go c.StartWriter()
 
+	//按照在服务端自定义的方法传递进来的 创建连接之后需要调用的处理业务，执行对应的Hook函数
+	c.TcpServer.CallOnConnStart(c)
 }
 
 //停止连接 结束当前连接的工作
@@ -119,11 +164,21 @@ func (c *Connection) Stop() {
 	}
 	c.isClosed = true
 
+	//调用服务端注册的自定义的方法 销毁连接之前 需要执行的业务Hook函数
+	c.TcpServer.CallOnConnStop(c)
+
 	//关闭socket连接
 	c.Conn.Close()
 
+	//告知 Writer协程关闭
+	c.ExitChan <- true
+
+	//将当前连接 从ConnMgr连接管理器集合中删除掉
+	c.TcpServer.GetConnMgr().Remove(c)
+
 	//回收资源（关闭管道chan）
 	close(c.ExitChan)
+	close(c.msgChan)
 }
 
 //获取当前原生连接的对象绑定socket conn句柄
@@ -158,10 +213,9 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	}
 
 	//将数据发送给客户端
-	if _, err := c.Conn.Write(binaryMsg); err != nil {
-		fmt.Println("消息包ID：", msgId, "消息包发送失败", err)
-		return errors.New("打包好的消息包体发送客户端失败")
-	}
+
+	//将打包的数据通过msgChan管道 发送给负责写消息的协程
+	c.msgChan <- binaryMsg
 
 	return nil
 }

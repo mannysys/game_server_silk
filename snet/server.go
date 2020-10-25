@@ -22,6 +22,13 @@ type Server struct {
 
 	//当前server消息管理多路由模块（用来绑定MsgID和对应的处理业务API关系）
 	MsgHandler siface.IMsgHandler
+	//连接管理器模块
+	ConnMgr siface.IConnManager
+
+	//该server创建链接之后 自动调用Hook函数
+	OnConnStart func(conn siface.IConnection)
+	//该server销毁链接之前 自动调用Hook函数
+	OnConnStop func(conn siface.IConnection)
 }
 
 
@@ -34,6 +41,8 @@ func (s *Server) Start() {
 
 	//开启一个协程去处理阻塞等待客户端连接业务（异步形式去处理客户端连接）
 	go func() {
+		//0 开启消息队列及Worker工作池
+		s.MsgHandler.StartWorkerPool()
 
 		//1 获取一个TCP的Addr（实例一个tcp协议自定义的地址和端口）
 		addr, err := net.ResolveTCPAddr(s.IPVersion, fmt.Sprintf("%s:%d",s.IP,s.Port))
@@ -62,8 +71,18 @@ func (s *Server) Start() {
 				continue  //只跳出当前循环
 			}
 
+			//------------------以下是处理客户端发起的连接----------------------------------
+
+			//设置最大连接个数的判断，如果超过最大连接，则关闭新的客户端连接
+			if s.ConnMgr.Len() >= utils.GlobalObject.MaxConn {
+				//TODO 给客户端响应一个超出最大连接的错误包
+				fmt.Println("[超出了设置的最大连接数]Too Many Connections MaxConn = ", utils.GlobalObject.MaxConn)
+				conn.Close()
+				continue
+			}
+
 			//将原生连接对象conn和自定义方法，交给我们封装的新连接模块去处理
-			dealConn := NewConnection(conn, cid, s.MsgHandler)
+			dealConn := NewConnection(s, conn, cid, s.MsgHandler)
 			cid ++
 
 			//启动当前连接业务处理
@@ -76,7 +95,9 @@ func (s *Server) Start() {
 }
 //停止服务器
 func (s *Server) Stop() {
-	//TODO 将一些服务器的资源、状态或者一些已经开辟的连接信息 进行停止或者回收
+	//将一些服务器的资源、状态或者一些已经开辟的连接信息 进行停止或者回收
+	fmt.Println("[服务端停止]stop server name", s.Name)
+	s.ConnMgr.ClearConn()
 
 }
 //运行服务器
@@ -97,6 +118,11 @@ func (s *Server) AddRouter(msgID uint32, router siface.IRouter) {
 	fmt.Println("路由注册添加成功！！")
 }
 
+//获取连接管理器实例
+func (s *Server) GetConnMgr() siface.IConnManager {
+	return s.ConnMgr
+}
+
 /*
 	初始化Server模块的方法
 */
@@ -107,8 +133,34 @@ func NewServer(name string) siface.IServer {
 		IP:        utils.GlobalObject.Host,
 		Port:      utils.GlobalObject.TcpPort,
 		MsgHandler:NewMsgHandler(),
+		ConnMgr: NewConnManager(),
 	}
 	return s
+}
+
+//-------------------------以下是创建连接之后 和 销毁连接之前的自定义的钩子函数-----------------------------------------
+
+//注册OnConnStart 创建连接之后的钩子函数方法
+func (s *Server) SetOnConnStart(hookFunc func(conn siface.IConnection)) {
+	s.OnConnStart = hookFunc
+}
+//注册OnConnStop 销毁连接之前的钩子函数方法
+func (s *Server) SetOnConnStop(hookFunc func(conn siface.IConnection)) {
+	s.OnConnStop = hookFunc
+}
+//调用OnConnStop 创建连接之后的钩子函数方法
+func (s *Server) CallOnConnStart(conn siface.IConnection) {
+	if s.OnConnStart != nil {
+		fmt.Println("[调用创建连接之后钩子函数]---> Call OnConnStart() ...")
+		s.OnConnStart(conn)
+	}
+}
+//调用OnConnStop 销毁连接之前的钩子函数方法
+func (s *Server) CallOnConnStop(conn siface.IConnection) {
+	if s.OnConnStop != nil {
+		fmt.Println("[调用销毁连接之前钩子函数]---> Call OnConnStop() ...")
+		s.OnConnStop(conn)
+	}
 }
 
 
