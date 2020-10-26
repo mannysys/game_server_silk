@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"io"
 	"net"
+	"sync"
 )
 
 /*
@@ -33,6 +34,11 @@ type Connection struct {
 
 	//消息管理多路由模块（用来绑定MsgID和对应的处理业务API关系）
 	MsgHandler siface.IMsgHandler
+
+	//连接属性集合
+	property map[string] interface{}
+	//保护连接属性的锁
+	propertyLock sync.RWMutex
 }
 
 //初始化连接模块的方法
@@ -45,6 +51,7 @@ func NewConnection(server siface.IServer, conn *net.TCPConn, connID uint32, msgH
 		isClosed:   false, //表示当前连接是否处于关闭状态，false表示连接是开启的状态
 		msgChan:    make(chan []byte),
 		ExitChan:   make(chan bool, 1),
+		property: 	make(map[string] interface{}),
 	}
 
 	//将conn连接模块实例，加入到 ConnManager连接管理器集合中
@@ -218,4 +225,39 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	c.msgChan <- binaryMsg
 
 	return nil
+}
+
+
+
+//--------------------------连接属性------------------------------
+
+//设置连接属性
+func (c *Connection) SetProperty(key string, value interface{}) {
+	//给map集合添加数据，先加写锁
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+
+	//添加一个连接属性
+	c.property[key] = value
+}
+//获取连接属性
+func (c *Connection) GetProperty(key string) (interface{}, error) {
+	//获取map集合数据，先加读锁
+	c.propertyLock.RLock()
+	defer c.propertyLock.RUnlock()
+
+	//读取属性
+	if value, ok := c.property[key]; ok {
+		return value, nil
+	} else {
+		return nil, errors.New("[找不到该连接属性]no property found")
+	}
+}
+//移除连接属性
+func (c *Connection) RemoveProperty(key string) {
+	//从map集合中删除数据，先加写锁
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	//删除属性
+	delete(c.property, key)
 }
