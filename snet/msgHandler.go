@@ -35,6 +35,7 @@ func (mh *MsgHandler) DoMsgHandler(request siface.IRequest) {
 	handler, ok := mh.Apis[request.GetMsgID()]
 	if !ok {
 		fmt.Println("调度执行的路由API无法找到", request.GetMsgID(), ", 你需要注册该路由")
+		return
 	}
 
 	//2 根据MsgID 调度对应router业务即可
